@@ -26,94 +26,58 @@ const COLORS = {
   dangerSoft: '#FCEBEB',
 };
 
-const STORAGE_KEY = 'kpi_dashboard_v1';
+const STORAGE_KEY = 'kpi_dashboard_v1'; // Deprecated: ahora usamos Vercel KV vía /api/kpis
 
 // ============================================================
-// DEFAULT SEED DATA (as function to avoid SSR hydration issues)
+// API CLIENT — fetch a las routes de Next.js
+// (los datos viven en Vercel KV, no en localStorage)
 // ============================================================
-function getDefaultKpis() {
-  const today = new Date().toISOString().split('T')[0];
-  return [
-    {
-      id: 'oriana-solorzano',
-      repName: 'Oriana Solórzano',
-      repRole: 'Cartera mixta en reconstrucción',
-      kpiLabel: 'Productos vendidos por cliente',
-      kpiType: 'ratio',
-      unit: 'productos/cliente',
-      baseline: 4.1,
-      target: 5.1,
-      current: 4.1,
-      reviewDate: '2026-05-20',
-      createdAt: today,
-      history: [{ date: today, value: 4.1, note: 'Baseline inicial' }],
-    },
-    {
-      id: 'paola-castaneda',
-      repName: 'Paola Castañeda',
-      repRole: 'Cartera amplia con potencial de reactivación',
-      kpiLabel: 'Productos vendidos por cliente',
-      kpiType: 'ratio',
-      unit: 'productos/cliente',
-      baseline: 2.5,
-      target: 4.0,
-      current: 2.5,
-      reviewDate: '2026-05-20',
-      createdAt: today,
-      history: [{ date: today, value: 2.5, note: 'Baseline inicial' }],
-    },
-    {
-      id: 'juan-diego-rivera',
-      repName: 'Juan Diego Rivera',
-      repRole: 'Cartera consolidada con rotación interna',
-      kpiLabel: 'Ticket promedio',
-      kpiType: 'monetary',
-      unit: 'COP',
-      baseline: 1301000,
-      target: 1561200,
-      current: 1301000,
-      reviewDate: '2026-05-20',
-      createdAt: today,
-      history: [{ date: today, value: 1301000, note: 'Baseline inicial (+20% objetivo)' }],
-    },
-    {
-      id: 'laura-garzon',
-      repName: 'Laura Garzón',
-      repRole: 'Cartera concentrada con cuentas de alto volumen',
-      kpiLabel: 'Clientes activos en cartera',
-      kpiType: 'count',
-      unit: 'clientes',
-      baseline: 20,
-      target: 50,
-      current: 20,
-      reviewDate: '2026-05-20',
-      createdAt: today,
-      history: [{ date: today, value: 20, note: 'Baseline inicial' }],
-    },
-  ];
+async function apiGet() {
+  const res = await fetch('/api/kpis', { cache: 'no-store' });
+  if (!res.ok) throw new Error('Error al cargar KPIs');
+  return res.json();
 }
 
-// ============================================================
-// STORAGE (localStorage)
-// ============================================================
-function loadFromStorage() {
-  if (typeof window === 'undefined') return null;
-  try {
-    const data = window.localStorage.getItem(STORAGE_KEY);
-    return data ? JSON.parse(data) : null;
-  } catch (e) {
-    console.error('Error reading localStorage:', e);
-    return null;
-  }
+async function apiCreate(kpi) {
+  const res = await fetch('/api/kpis', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(kpi),
+  });
+  if (!res.ok) throw new Error('Error al crear KPI');
+  return res.json();
 }
 
-function saveToStorage(data) {
-  if (typeof window === 'undefined') return;
-  try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-  } catch (e) {
-    console.error('Error writing localStorage:', e);
-  }
+async function apiUpdate(id, updates) {
+  const res = await fetch(`/api/kpis/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(updates),
+  });
+  if (!res.ok) throw new Error('Error al actualizar KPI');
+  return res.json();
+}
+
+async function apiDelete(id) {
+  const res = await fetch(`/api/kpis/${id}`, { method: 'DELETE' });
+  if (!res.ok) throw new Error('Error al eliminar KPI');
+  return res.json();
+}
+
+async function apiLogEntry(id, entry) {
+  const res = await fetch(`/api/kpis/${id}/log`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(entry),
+  });
+  if (!res.ok) throw new Error('Error al registrar avance');
+  return res.json();
+}
+
+async function apiDeleteEntry(kpiId, entryIndex) {
+  const res = await fetch(`/api/kpis/${kpiId}/entry/${entryIndex}`, { method: 'DELETE' });
+  if (!res.ok) throw new Error('Error al eliminar registro');
+  return res.json();
 }
 
 // ============================================================
@@ -232,68 +196,73 @@ export default function KpiDashboard() {
 
   useEffect(() => {
     setMounted(true);
-    const saved = loadFromStorage();
-    if (saved && Array.isArray(saved) && saved.length > 0) {
-      setKpis(saved);
-    } else {
-      const defaults = getDefaultKpis();
-      setKpis(defaults);
-      saveToStorage(defaults);
-    }
-    setLoading(false);
+    apiGet()
+      .then(data => {
+        setKpis(Array.isArray(data) ? data : []);
+        setLoading(false);
+      })
+      .catch(err => {
+        console.error('Error cargando KPIs:', err);
+        setKpis([]);
+        setLoading(false);
+      });
   }, []);
 
-  function saveAll(newKpis) {
-    setKpis(newKpis);
-    saveToStorage(newKpis);
+  async function handleAdd(newKpi) {
+    try {
+      const created = await apiCreate(newKpi);
+      setKpis(prev => [...prev, created]);
+      setAdding(false);
+    } catch (e) {
+      console.error(e);
+      window.alert('No se pudo guardar el KPI. Revisa tu conexión.');
+    }
   }
 
-  function handleAdd(newKpi) {
-    const today = getToday();
-    const kpi = {
-      ...newKpi,
-      id: newKpi.repName.toLowerCase().replace(/[^a-z0-9]/g, '-') + '-' + Date.now(),
-      createdAt: today,
-      current: newKpi.baseline,
-      history: [{ date: today, value: newKpi.baseline, note: 'Baseline inicial' }],
-    };
-    saveAll([...kpis, kpi]);
-    setAdding(false);
+  async function handleEdit(id, updated) {
+    try {
+      const result = await apiUpdate(id, updated);
+      setKpis(prev => prev.map(k => k.id === id ? result : k));
+      setEditing(null);
+    } catch (e) {
+      console.error(e);
+      window.alert('No se pudo actualizar el KPI.');
+    }
   }
 
-  function handleEdit(id, updated) {
-    const newKpis = kpis.map(k => k.id === id ? { ...k, ...updated } : k);
-    saveAll(newKpis);
-    setEditing(null);
-  }
-
-  function handleDelete(id) {
+  async function handleDelete(id) {
     if (!window.confirm('¿Seguro que quieres eliminar este KPI? Esta acción no se puede deshacer.')) return;
-    saveAll(kpis.filter(k => k.id !== id));
-    setSelected(null);
+    try {
+      await apiDelete(id);
+      setKpis(prev => prev.filter(k => k.id !== id));
+      setSelected(null);
+    } catch (e) {
+      console.error(e);
+      window.alert('No se pudo eliminar el KPI.');
+    }
   }
 
-  function handleLog(id, entry) {
-    const newKpis = kpis.map(k => {
-      if (k.id !== id) return k;
-      const newHistory = [...k.history, entry].sort((a, b) => a.date.localeCompare(b.date));
-      return { ...k, current: entry.value, history: newHistory };
-    });
-    saveAll(newKpis);
-    setLogging(null);
+  async function handleLog(id, entry) {
+    try {
+      const updated = await apiLogEntry(id, entry);
+      setKpis(prev => prev.map(k => k.id === id ? updated : k));
+      setLogging(null);
+    } catch (e) {
+      console.error(e);
+      window.alert('No se pudo registrar el avance.');
+    }
   }
 
-  function handleDeleteEntry(kpiId, entryIndex) {
+  async function handleDeleteEntry(kpiId, entryIndex) {
     if (!window.confirm('¿Eliminar este registro?')) return;
-    const newKpis = kpis.map(k => {
-      if (k.id !== kpiId) return k;
-      const newHistory = k.history.filter((_, i) => i !== entryIndex);
-      const lastValue = newHistory.length > 0 ? newHistory[newHistory.length - 1].value : k.baseline;
-      return { ...k, history: newHistory, current: lastValue };
-    });
-    saveAll(newKpis);
-    const updated = newKpis.find(k => k.id === kpiId);
-    if (updated) setSelected(updated);
+    try {
+      const updated = await apiDeleteEntry(kpiId, entryIndex);
+      setKpis(prev => prev.map(k => k.id === kpiId ? updated : k));
+      if (updated) setSelected(updated);
+    } catch (e) {
+      console.error(e);
+      window.alert('No se pudo eliminar el registro.');
+    }
   }
 
   const summary = useMemo(() => {
