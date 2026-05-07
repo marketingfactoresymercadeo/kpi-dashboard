@@ -1,32 +1,37 @@
 import { NextResponse } from 'next/server';
-import { updateKpi, deleteKpi } from '@/lib/kpi-store';
+import { getAllKpis, addKpi } from '@/lib/kpi-store';
 
 export const dynamic = 'force-dynamic';
 
-// PUT /api/kpis/[id] — actualizar KPI
-export async function PUT(request, { params }) {
+// GET /api/kpis — listar todos los KPIs
+export async function GET() {
   try {
-    const { id } = params;
-    const updates = await request.json();
-    const updated = await updateKpi(id, updates);
-    if (!updated) {
-      return NextResponse.json({ error: 'KPI no encontrado' }, { status: 404 });
-    }
-    return NextResponse.json(updated);
+    const kpis = await getAllKpis();
+    return NextResponse.json(kpis);
   } catch (e) {
-    console.error('PUT /api/kpis/[id] error:', e);
-    return NextResponse.json({ error: 'Error al actualizar KPI' }, { status: 500 });
+    console.error('GET /api/kpis error:', e);
+    return NextResponse.json({ error: 'Error al cargar KPIs' }, { status: 500 });
   }
 }
 
-// DELETE /api/kpis/[id]
-export async function DELETE(request, { params }) {
+// POST /api/kpis — crear KPI nuevo
+export async function POST(request) {
   try {
-    const { id } = params;
-    const result = await deleteKpi(id);
-    return NextResponse.json(result);
+    const body = await request.json();
+    const today = new Date().toISOString().split('T')[0];
+
+    const kpi = {
+      ...body,
+      id: body.repName.toLowerCase().replace(/[^a-z0-9]/g, '-') + '-' + Date.now(),
+      createdAt: today,
+      current: body.baseline,
+      history: [{ date: today, value: body.baseline, note: 'Baseline inicial' }],
+    };
+
+    await addKpi(kpi);
+    return NextResponse.json(kpi, { status: 201 });
   } catch (e) {
-    console.error('DELETE /api/kpis/[id] error:', e);
-    return NextResponse.json({ error: 'Error al eliminar KPI' }, { status: 500 });
+    console.error('POST /api/kpis error:', e);
+    return NextResponse.json({ error: 'Error al crear KPI' }, { status: 500 });
   }
 }
